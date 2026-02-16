@@ -61,15 +61,14 @@ bash scripts/dytto.sh search-stories "trip to NYC" # Search stories
 ### Write Context
 
 ```bash
-# Unstructured observe — just dump text, Dytto extracts facts
-bash scripts/dytto.sh observe "User mentioned they prefer morning meetings"
+# Observe — dump any text, Dytto extracts facts automatically
+bash scripts/dytto.sh observe "User mentioned they prefer morning meetings. Had a chat about the robotaxi project."
 
-# Structured fact storage
+# Structured fact storage (when you know exactly what to store)
 bash scripts/dytto.sh store-fact "Prefers morning meetings" "work_preferences"
-
-# Push chat history back to Dytto (bidirectional context)
-bash scripts/dytto.sh push-chat '[{"role":"user","content":"..."}, {"role":"assistant","content":"..."}]'
 ```
+
+**Use observe for everything** — chat summaries, events, conversations, whatever. Just text in, context out.
 
 ### External Data
 
@@ -101,7 +100,6 @@ All endpoints require `Authorization: Bearer <token>` header. Token can be:
 | POST | `/api/context/search` | Semantic search `{"query": "..."}` | `search:execute` or domain scopes |
 | POST | `/api/context/scope` | Task-based scoped context (see below) | domain scopes |
 | POST | `/api/context/initialize` | Initialize context (first-time setup) | `context:write` |
-| POST | `/api/context/process` | Push chat messages to absorb into context | `context:write` |
 
 #### Scoped Context (`/api/context/scope`)
 
@@ -142,49 +140,26 @@ curl -X POST "https://dytto.onrender.com/api/v1/facts/query" \
   -d '{"categories": ["work", "projects"], "limit": 20}'
 ```
 
-### Push Chat Context (`/api/context/process`)
-
-After a chat session ends, push the conversation to Dytto so it becomes part of the user's context. This enables bidirectional context flow — the agent doesn't just read context, it writes back what happened.
-
-```bash
-curl -X POST "https://dytto.onrender.com/api/context/process" \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "messages": [
-      {"role": "user", "content": "What should I do about the robotaxi integration?"},
-      {"role": "assistant", "content": "Based on your schedule, I'\''d suggest..."}
-    ]
-  }'
-```
-
-Response: `202 Accepted` — processing happens async.
-
-**When to use:**
-- End of chat session (user navigates away, app closes)
-- After significant conversations worth remembering
-- NOT after every message (batched is better)
-
-The chat content gets absorbed into the user's context and may appear in future stories or context queries.
-
 ### Observe Endpoint (`/api/v1/observe`)
 
-Push unstructured observations. Dytto extracts facts via LLM.
+**The universal "text in → context out" method.** Push any unstructured text — Dytto extracts meaning and stores it.
 
 ```bash
 curl -X POST "https://dytto.onrender.com/api/v1/observe" \
   -H "Authorization: Bearer dyt_..." \
   -d '{
-    "input": "User mentioned they have a peanut allergy and prefer window seats",
-    "source": "travel_agent"
+    "input": "Had a conversation about robotaxi integration. User prefers window seats and has a peanut allergy.",
+    "source": "my_agent"
   }'
 ```
 
 Dytto will:
-1. Extract atomic facts: "Has peanut allergy", "Prefers window seats"
-2. Categorize: `health`, `preferences`
+1. Extract atomic facts: "Prefers window seats", "Has peanut allergy", "Discussed robotaxi integration"
+2. Categorize: `preferences`, `health`, `projects`
 3. Deduplicate against existing facts
 4. Store with embeddings for search
+
+**Use this for everything:** chat summaries, events, milestones, observations, whatever. Just dump text, Dytto makes sense of it.
 
 ### Stories API (`/api/stories`)
 

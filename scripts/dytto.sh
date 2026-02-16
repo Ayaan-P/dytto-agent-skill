@@ -262,11 +262,6 @@ case "$CMD" in
         # List available API key scopes
         api_get "/api/keys/scopes"
         ;;
-    push-chat)
-        # Push chat messages to context (bidirectional context flow)
-        messages="${1:?Usage: dytto.sh push-chat '<messages_json>'}"
-        api_post "/api/context/process" "{\"messages\": ${messages}}"
-        ;;
     help|*)
         cat <<'EOF'
 Dytto Context CLI — personal context API for AI agents
@@ -293,9 +288,8 @@ Facts:
   fact-categories              List all fact categories
 
 Write:
-  observe <text> [source]      Push unstructured observations → auto-extracted facts
-  store-fact <desc> [category] Store a learned fact (structured)
-  push-chat <messages_json>    Push chat history to absorb into context
+  observe <text> [source]      Any text → Dytto extracts facts (use for everything)
+  store-fact <desc> [category] Store a specific fact (structured)
   update <summary> [insights] [concepts] [notes]  Comprehensive update
 
 External:
