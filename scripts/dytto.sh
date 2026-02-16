@@ -154,6 +154,25 @@ case "$CMD" in
     insights)
         api_get "/api/context/insights"
         ;;
+    now)
+        # Real-time context snapshot
+        api_get "/api/context/now"
+        ;;
+    quality)
+        # Context quality assessment
+        api_get "/api/context/quality"
+        ;;
+    scope)
+        # Task-based scoped context
+        task="${1:?Usage: dytto.sh scope <task> [agent_type] [categories]}"
+        agent_type="${2:-}"
+        categories="${3:-}"
+        data="{\"task\":\"$(json_escape "$task")\""
+        [[ -n "$agent_type" ]] && data="${data},\"agent_type\":\"${agent_type}\""
+        [[ -n "$categories" ]] && data="${data},\"categories\":${categories}"
+        data="${data}}"
+        api_post "/api/context/scope" "$data"
+        ;;
     search)
         query="${1:?Usage: dytto.sh search <query>}"
         api_post "/api/context/search" "{\"query\":\"${query}\"}"
@@ -164,7 +183,24 @@ case "$CMD" in
         ;;
     search-stories)
         query="${1:?Usage: dytto.sh search-stories <query>}"
-        api_get "/api/stories/search?q=$(urlencode "$query")"
+        api_post "/api/stories/search" "{\"query\":\"${query}\"}"
+        ;;
+    story-dates)
+        # List available story dates
+        api_get "/api/stories/dates"
+        ;;
+    facts)
+        # Query facts with optional category filter
+        category="${1:-}"
+        if [[ -n "$category" ]]; then
+            api_post "/api/v1/facts/query" "{\"categories\":[\"${category}\"],\"limit\":20}"
+        else
+            api_post "/api/v1/facts/query" "{\"limit\":20}"
+        fi
+        ;;
+    fact-categories)
+        # List all fact categories
+        api_get "/api/v1/facts/categories"
         ;;
     weather)
         lat="${1:?Usage: dytto.sh weather <lat> <lon>}"
@@ -226,24 +262,40 @@ case "$CMD" in
         # List available API key scopes
         api_get "/api/keys/scopes"
         ;;
+    push-chat)
+        # Push chat messages to context (bidirectional context flow)
+        messages="${1:?Usage: dytto.sh push-chat '<messages_json>'}"
+        api_post "/api/context/process" "{\"messages\": ${messages}}"
+        ;;
     help|*)
         cat <<'EOF'
 Dytto Context CLI — personal context API for AI agents
 
 Usage: dytto.sh <command> [args...]
 
-Read:
+Read Context:
   context                      Full context profile (who is this person)
   summary                      Quick context summary
   patterns                     Behavioral patterns and routines
   insights                     Derived insights about the user
+  now                          Real-time snapshot (today + upcoming)
+  quality                      Context quality assessment
+  scope <task> [type] [cats]   Task-based scoped context
+
+Search:
   search <query>               Semantic search across context
   story <YYYY-MM-DD>           Get journal/story for a date
+  story-dates                  List available story dates
   search-stories <query>       Search across stories
+
+Facts:
+  facts [category]             Query facts (optionally by category)
+  fact-categories              List all fact categories
 
 Write:
   observe <text> [source]      Push unstructured observations → auto-extracted facts
   store-fact <desc> [category] Store a learned fact (structured)
+  push-chat <messages_json>    Push chat history to absorb into context
   update <summary> [insights] [concepts] [notes]  Comprehensive update
 
 External:
@@ -253,6 +305,9 @@ External:
 Agent actions (service key auth only):
   notify <message> [title]     Send push notification to user
   event <summary> [type]       Report event (conversation/activity/social/milestone)
+
+API Keys:
+  scopes                       List available API key scopes
 
 Auth (priority order):
   1. API Key:      DYTTO_API_KEY=dyt_...  (recommended)

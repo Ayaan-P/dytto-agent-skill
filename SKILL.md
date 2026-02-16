@@ -7,6 +7,8 @@ description: "Give your agent persistent memory and real-time personal context v
 
 Dytto gives your agent memory. Query it to know who your user is, what happened today, and what they care about.
 
+**Base URL:** `https://dytto.onrender.com`
+
 ## Setup
 
 ### Option 1: API Key (Recommended)
@@ -35,19 +37,11 @@ export DYTTO_EMAIL="user@example.com"
 export DYTTO_PASSWORD="your-password"
 ```
 
-Or config file:
-```json
-{
-  "email": "user@example.com",
-  "password": "your-password"
-}
-```
-
-## Commands
+## CLI Commands
 
 Run via: `bash scripts/dytto.sh <command> [args...]`
 
-### Read context
+### Read Context
 
 ```bash
 bash scripts/dytto.sh context          # Full profile — who is this person
@@ -56,139 +50,298 @@ bash scripts/dytto.sh patterns         # Behavioral patterns (routines, habits)
 bash scripts/dytto.sh insights         # Derived insights
 ```
 
-Use `context` on first interaction. Use `patterns`/`insights` for personalization.
-
 ### Search
 
 ```bash
 bash scripts/dytto.sh search "career goals"        # Semantic search
-bash scripts/dytto.sh story 2026-01-30              # Journal for a date
-bash scripts/dytto.sh search-stories "trip to NYC"  # Search stories
+bash scripts/dytto.sh story 2026-01-30             # Journal for a date
+bash scripts/dytto.sh search-stories "trip to NYC" # Search stories
 ```
 
-### Write context back
+### Write Context
 
 ```bash
-# NEW: Unstructured observe — just dump text, Dytto extracts facts
-bash scripts/dytto.sh observe "User mentioned they prefer morning meetings and are considering a career change to startups"
+# Unstructured observe — just dump text, Dytto extracts facts
+bash scripts/dytto.sh observe "User mentioned they prefer morning meetings"
 
 # Structured fact storage
 bash scripts/dytto.sh store-fact "Prefers morning meetings" "work_preferences"
 
-# Comprehensive update with arrays
-bash scripts/dytto.sh update "Discussed career pivot" '["Considering startups"]' '[]' '[]'
+# Push chat history back to Dytto (bidirectional context)
+bash scripts/dytto.sh push-chat '[{"role":"user","content":"..."}, {"role":"assistant","content":"..."}]'
 ```
 
-**The `observe` command is the easiest way to push context.** Just send unstructured text — Dytto uses an LLM to extract atomic facts, categorize them, and deduplicate against existing context.
-
-### External data
+### External Data
 
 ```bash
 bash scripts/dytto.sh weather 42.37 -71.11
 bash scripts/dytto.sh news 42.37 -71.11 "Cambridge MA"
 ```
 
-## When to use
+---
 
-| Situation | Command |
-|-----------|---------|
-| Session start | `context` or `summary` |
-| User references their past | `search` or `story` |
-| Personalizing a response | `patterns` + `insights` |
-| Learned something about user | `observe` (easiest) or `store-fact` |
-| Need location/weather awareness | `weather` |
+## REST API Reference
 
-## The Observe Pattern
+All endpoints require `Authorization: Bearer <token>` header. Token can be:
+- API key: `dyt_...`
+- JWT from `/api/auth/login`
+- Service key (for hosted agents)
 
-The `observe` command is designed for **low-effort context capture**. Instead of carefully structuring facts, just send what you learned:
+### Context Endpoints
+
+| Method | Endpoint | Description | Scopes |
+|--------|----------|-------------|--------|
+| GET | `/api/context` | Full context narrative | `context:read` or domain scopes |
+| GET | `/api/context/summary` | Quick summary | `context:read` or domain scopes |
+| GET | `/api/context/patterns` | Behavioral patterns | `patterns:read` or domain scopes |
+| GET | `/api/context/insights` | Derived insights | `context:read` or domain scopes |
+| GET | `/api/context/now` | Real-time snapshot (today's activities, upcoming schedule) | `context:read` or domain scopes |
+| GET | `/api/context/quality` | Context quality assessment | `context:read` |
+| GET | `/api/context/latest` | Latest context with timestamp | `context:read` or domain scopes |
+| POST | `/api/context/search` | Semantic search `{"query": "..."}` | `search:execute` or domain scopes |
+| POST | `/api/context/scope` | Task-based scoped context (see below) | domain scopes |
+| POST | `/api/context/initialize` | Initialize context (first-time setup) | `context:write` |
+| POST | `/api/context/process` | Push chat messages to absorb into context | `context:write` |
+
+#### Scoped Context (`/api/context/scope`)
+
+Task-based context retrieval. Agent describes what it needs, Dytto returns only relevant facts.
 
 ```bash
-# Good: Natural, unstructured observations
-bash scripts/dytto.sh observe "User is stressed about the project deadline next week. They mentioned preferring to work from the office on Tuesdays."
+curl -X POST "https://dytto.onrender.com/api/context/scope" \
+  -H "Authorization: Bearer dyt_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task": "Drive user home from work, optimize route and climate",
+    "agent_type": "robotaxi",
+    "max_tokens": 2000,
+    "categories": ["location", "preferences"]
+  }'
+```
 
-# Also good: Session summaries
-bash scripts/dytto.sh observe "Today we discussed meal planning. User wants to eat healthier and is interested in Mediterranean diet. Has a peanut allergy."
+Response includes:
+- `context`: Filtered facts, patterns, preferences
+- `scoping_reasoning`: Why these categories were selected
+- `categories_used`: Which fact categories were included
+- `token_count`: Approximate token count
+
+### Facts API (`/api/v1/facts`)
+
+Structured fact storage and retrieval.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/facts/query` | Query facts with filters |
+| GET | `/api/v1/facts/categories` | List all fact categories |
+| GET | `/api/v1/facts/<fact_id>` | Get specific fact by ID |
+
+```bash
+# Query facts by category
+curl -X POST "https://dytto.onrender.com/api/v1/facts/query" \
+  -H "Authorization: Bearer dyt_..." \
+  -d '{"categories": ["work", "projects"], "limit": 20}'
+```
+
+### Push Chat Context (`/api/context/process`)
+
+After a chat session ends, push the conversation to Dytto so it becomes part of the user's context. This enables bidirectional context flow — the agent doesn't just read context, it writes back what happened.
+
+```bash
+curl -X POST "https://dytto.onrender.com/api/context/process" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {"role": "user", "content": "What should I do about the robotaxi integration?"},
+      {"role": "assistant", "content": "Based on your schedule, I'\''d suggest..."}
+    ]
+  }'
+```
+
+Response: `202 Accepted` — processing happens async.
+
+**When to use:**
+- End of chat session (user navigates away, app closes)
+- After significant conversations worth remembering
+- NOT after every message (batched is better)
+
+The chat content gets absorbed into the user's context and may appear in future stories or context queries.
+
+### Observe Endpoint (`/api/v1/observe`)
+
+Push unstructured observations. Dytto extracts facts via LLM.
+
+```bash
+curl -X POST "https://dytto.onrender.com/api/v1/observe" \
+  -H "Authorization: Bearer dyt_..." \
+  -d '{
+    "input": "User mentioned they have a peanut allergy and prefer window seats",
+    "source": "travel_agent"
+  }'
 ```
 
 Dytto will:
-1. Extract atomic facts: "User prefers working from office on Tuesdays", "User has peanut allergy"
-2. Categorize them: `work`, `health`, `food`, etc.
-3. Deduplicate: Skip facts already in context
-4. Store with embeddings for semantic search
+1. Extract atomic facts: "Has peanut allergy", "Prefers window seats"
+2. Categorize: `health`, `preferences`
+3. Deduplicate against existing facts
+4. Store with embeddings for search
 
-**Every agent that writes context makes the system smarter for all agents.**
+### Stories API (`/api/stories`)
+
+Daily journals/stories generated from user activity.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/stories/<story_id>` | Get story by ID |
+| GET | `/api/stories/date/<YYYY-MM-DD>` | Get story for a date |
+| GET | `/api/stories/dates` | List available story dates |
+| POST | `/api/stories/search` | Search stories `{"query": "..."}` |
+| POST | `/api/stories/generate` | Generate story for date range |
+
+### External Data
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/weather/current?latitude=X&longitude=Y` | Current weather |
+| GET | `/api/weather/forecast?latitude=X&longitude=Y` | Weather forecast |
+| GET | `/api/weather/context?latitude=X&longitude=Y` | Weather as context narrative |
+| GET | `/api/news/context?latitude=X&longitude=Y&location=NAME` | Local news context |
+
+### API Key Management (`/api/keys`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/keys/scopes` | List available scopes |
+| POST | `/api/keys` | Create new API key |
+| GET | `/api/keys` | List user's API keys |
+| DELETE | `/api/keys/<key_id>` | Revoke an API key |
+
+```bash
+# Create a scoped API key
+curl -X POST "https://dytto.onrender.com/api/keys" \
+  -H "Authorization: Bearer <jwt>" \
+  -d '{
+    "name": "Robotaxi Agent",
+    "scopes": ["transportation", "schedule", "preferences"],
+    "rate_limit_per_minute": 60
+  }'
+```
+
+### Agent Endpoints (`/api/agent`)
+
+For hosted agents with service key auth.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/agent/context?user_id=X` | Get user context |
+| POST | `/api/agent/notify` | Send push notification |
+| POST | `/api/agent/events` | Report events |
+| GET | `/api/agent/messages?user_id=X` | Get agent messages |
+| GET | `/api/agent/stories?user_id=X` | Get user stories |
+| GET | `/api/agent/social?user_id=X` | Get social/relationship data |
+| GET | `/api/agent/places?user_id=X` | Get frequent places |
+
+### Auth Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/auth/login` | Login with email/password, returns JWT |
+| POST | `/api/auth/refresh` | Refresh JWT token |
+
+### User Profile (`/api/user`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/user/profile` | Get user profile |
+| POST | `/api/user/profile` | Update user profile |
+| POST | `/api/user/notification-preferences` | Set notification prefs |
+| POST | `/api/user/register-push-token` | Register push notification token |
+
+### Social Links (`/api/sociallinks`)
+
+Relationship tracking and social context.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/sociallinks/relationships` | List relationships |
+| POST | `/api/sociallinks/relationships` | Create relationship |
+| POST | `/api/sociallinks/interactions` | Log interaction |
+| GET | `/api/sociallinks/dashboard` | Social dashboard |
+| GET | `/api/sociallinks/context/suggestions` | Get relationship suggestions |
+
+### OAuth (`/api/v1/oauth`)
+
+For third-party app integrations.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/developers/applications` | Register OAuth app |
+| GET | `/api/v1/developers/applications` | List your apps |
+| GET | `/authorize` | OAuth authorization page |
+| POST | `/api/v1/oauth/authorize` | Approve authorization |
+| POST | `/api/v1/oauth/token` | Exchange code for token |
+| GET | `/api/v1/oauth/scopes` | List OAuth scopes |
+| GET | `/api/v1/user/connected-apps` | User's connected apps |
+
+---
 
 ## API Key Scopes
 
-When creating an API key, you can limit what it can access:
+### Domain Scopes (Use-Case Based)
+
+These filter context to specific life domains:
 
 | Scope | Access |
 |-------|--------|
-| `context:read` | Read full context narrative |
+| `transportation` | Transport, places, schedule, preferences |
+| `health` | Health, food, lifestyle, schedule |
+| `social` | Friends, family, events, entertainment |
+| `work` | Work, projects, schedule, places |
+| `home` | Places, lifestyle, preferences, family |
+| `entertainment` | Entertainment, preferences, lifestyle |
+| `food` | Food, preferences, health |
+
+### Technical Scopes
+
+| Scope | Access |
+|-------|--------|
+| `context:read` | Full context narrative (all categories) |
 | `context:write` | Write to context |
-| `observe` | Use the observe endpoint |
-| `patterns:read` | Read behavioral patterns |
-| `stories:read` | Read daily stories |
+| `observe` | Use observe endpoint |
+| `patterns:read` | Behavioral patterns |
+| `stories:read` | Daily stories |
 | `search:execute` | Semantic search |
-| `location` | Location data |
-| `schedule` | Calendar/schedule patterns |
-| `preferences` | User preferences |
-| `relationships` | Contact/relationship info |
-| `work` | Work-related context |
-| `health` | Health/fitness data |
 
-## Setup: Nightly Context Sync
+### Fine-Grained Scopes
 
-**After first successful auth, set up a nightly cron job** to push conversation logs back to Dytto:
+| Scope | Categories |
+|-------|------------|
+| `location` | places, transportation |
+| `schedule` | schedule, events |
+| `preferences` | preferences |
+| `relationships` | family, friends |
+| `lifestyle` | lifestyle |
+| `financial` | financial |
+| `travel` | places, transportation, schedule |
 
-```
-Schedule: 0 23 * * * (11 PM daily)
-Task: Read today's conversation logs or memory files. 
-      Dump them directly to: bash scripts/dytto.sh observe "<conversation log>"
-      Dytto extracts the facts — you don't have to.
-```
+**Example:** A robotaxi agent with `transportation` scope can see location, route preferences, and schedule — but NOT health, financial, or relationship data.
 
-The `observe` endpoint accepts raw conversation logs, session summaries, or any unstructured text. It uses an LLM to extract atomic facts, categorize them, and deduplicate against existing context. **Don't pre-process — just send the raw logs.**
-
-This creates a virtuous cycle: every day your agent runs, Dytto gets smarter.
-
-## Agent Actions (hosted agents with service key)
-
-When running as a hosted Dytto agent (AGENT_SERVICE_KEY + DYTTO_USER_ID set):
-
-### Send Push Notification
-```bash
-bash scripts/dytto.sh notify "It's going to rain at 3pm — grab an umbrella" "Weather Alert"
-```
-Use during heartbeats for genuinely useful proactive messages. NOT for greetings.
-
-### Report Events
-Log activities that should appear in the user's daily story:
-```bash
-bash scripts/dytto.sh event "Discussed meal planning and weekly grocery strategy" "conversation"
-bash scripts/dytto.sh event "Recommended Thai restaurant based on preferences" "recommendation"
-```
-Event types: `conversation`, `activity`, `social`, `milestone`, `recommendation`
+---
 
 ## Auth Modes
 
-**API Key** (recommended for all agents):
-- Set `DYTTO_API_KEY=dyt_...`
-- Scoped access, no password exposure
-- Get keys at https://dytto.app/settings/api-keys
+| Mode | Setup | Use Case |
+|------|-------|----------|
+| **API Key** | `DYTTO_API_KEY=dyt_...` | Third-party agents (recommended) |
+| **Email/Password** | `DYTTO_EMAIL` + `DYTTO_PASSWORD` | Personal agents with full access |
+| **Service Key** | `AGENT_SERVICE_KEY` + `DYTTO_USER_ID` | Hosted agents on Dytto platform |
 
-**Email/Password** (legacy personal agents):
-- Set `DYTTO_EMAIL` + `DYTTO_PASSWORD`
-- Full access via user JWT
-
-**Service Key** (Dytto agent platform):
-- Set `AGENT_SERVICE_KEY` + `DYTTO_USER_ID`
-- For hosted agents with push notifications
+---
 
 ## Notes
 
 - First call may take 20-30s (cold start on Render free tier). Subsequent calls are fast.
 - Token cached for ~50 min at `/tmp/.dytto-token-cache`.
-- Context is a rich narrative. Parse it naturally, don't expect structured JSON.
 - The `observe` endpoint uses an LLM for extraction — expect ~10s latency.
+- Domain-scoped API keys automatically filter responses to allowed categories.
 - All data belongs to the user. Treat it with respect.
